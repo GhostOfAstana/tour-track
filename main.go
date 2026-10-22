@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ernat-soltanbekov/tour-track/internal/catalog"
-	"github.com/ernat-soltanbekov/tour-track/internal/web"
+	"github.com/GhostOfAstana/tour-track/internal/catalog"
+	"github.com/GhostOfAstana/tour-track/internal/web"
 )
 
 type config struct{ address, apiURL string }

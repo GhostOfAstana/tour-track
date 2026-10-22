@@ -2,7 +2,7 @@
 
 **Music in motion.** Каталог артистов, концертных маршрутов и объяснимых оценок активности.
 
-[![Go audit](https://github.com/ernat-soltanbekov/tour-track/actions/workflows/ci.yml/badge.svg)](https://github.com/ernat-soltanbekov/tour-track/actions/workflows/ci.yml)
+[![Go audit](https://github.com/GhostOfAstana/tour-track/actions/workflows/ci.yml/badge.svg)](https://github.com/GhostOfAstana/tour-track/actions/workflows/ci.yml)
 
 Go • только стандартная библиотека • HTML/CSS/JavaScript без зависимостей • Tomorrow School
 
@@ -13,7 +13,7 @@ Go • только стандартная библиотека • HTML/CSS/Jav
 Нужен Go **1.23+**. Рекомендуется актуальная поддерживаемая версия Go. Node.js, npm, база данных и API-ключи для запуска не нужны.
 
 ```sh
-git clone https://github.com/ernat-soltanbekov/tour-track.git
+git clone https://github.com/GhostOfAstana/tour-track.git
 cd tour-track
 go run .
 ```
@@ -37,7 +37,7 @@ go run .
 
 ## Личная история
 
-Автор — **Yernat “GhostOfAstana” Soltanbekov**: военный опыт, техническое образование, утренняя практика боевых искусств с 2008 года, студент Tomorrow School, кандидат на работу в команде Astana Hub.
+Автор — **[Ернат Солтанбеков (Yernat Soltanbekov)](https://github.com/GhostOfAstana)**: военный опыт, техническое образование, утренняя практика боевых искусств с 2008 года, студент Tomorrow School, кандидат на работу в команде Astana Hub.
 
 Дизайн передаёт дисциплину через строгую сетку, спокойную тёмную палитру, ясные цифры и повторяемый ритм. История автора находится в разделе **Field notes**. Это независимый учебный проект; он не заявляет официального представительства или трудоустройства в Astana Hub.
 

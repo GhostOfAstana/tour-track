@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ernat-soltanbekov/tour-track/internal/catalog"
+	"github.com/GhostOfAstana/tour-track/internal/catalog"
 )
 
 //go:embed templates/*.html static/*

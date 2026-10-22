@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ernat-soltanbekov/tour-track/internal/activity"
+	"github.com/GhostOfAstana/tour-track/internal/activity"
 )
 
 type Artist struct {

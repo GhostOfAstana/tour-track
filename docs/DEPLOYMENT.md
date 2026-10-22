@@ -13,7 +13,7 @@
 В корне есть `render.yaml` с нативным Go runtime, планом `free`, сборкой, командой запуска и `/healthz`.
 
 1. Войдите в свой аккаунт Render.
-2. Откройте [развёртывание этого репозитория](https://render.com/deploy?repo=https://github.com/ernat-soltanbekov/tour-track).
+2. Откройте [развёртывание этого репозитория](https://render.com/deploy?repo=https://github.com/GhostOfAstana/tour-track).
 3. Проверьте выбранный репозиторий и план. Создайте сервис.
 4. Дождитесь успешной сборки, откройте выданный HTTPS-адрес `*.onrender.com`.
 5. Проверьте `/healthz`, `/readyz`, `/`, `/artists/1`, `/artists/30` и поиск.

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ernat-soltanbekov/tour-track/internal/activity"
+	"github.com/GhostOfAstana/tour-track/internal/activity"
 )
 
 const MaxResponseBytes = 4 << 20

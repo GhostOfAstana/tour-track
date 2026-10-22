@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ernat-soltanbekov/tour-track/internal/catalog"
+	"github.com/GhostOfAstana/tour-track/internal/catalog"
 )
 
 type sourceFunc func(context.Context) (catalog.Snapshot, error)
