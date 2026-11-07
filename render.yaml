@@ -3,11 +3,9 @@ services:
     name: tour-track
     runtime: go
     plan: free
-    buildCommand: go build -trimpath -ldflags="-s -w" -o bin/tour-track .
+    buildCommand: go build -trimpath -o bin/tour-track .
     startCommand: ./bin/tour-track
-    healthCheckPath: /healthz
+    healthCheckPath: /readyz
     envVars:
-      - key: HOST
-        value: 0.0.0.0
       - key: GO_VERSION
-        value: 1.27.1
+        value: 1.26.8

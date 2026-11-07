@@ -1,184 +1,92 @@
 "use strict";
 
-// Progressive enhancement: the same form remains a normal GET without JS.
-// All API text enters through textContent, never through HTML interpolation.
-(() => {
-  const fallbackImages = () =>
-    document.querySelectorAll("img").forEach((img) => {
-      const fallback = () => {
-        img.src = "/static/artist.svg";
-      };
-      img.addEventListener("error", fallback, { once: true });
-      if (img.complete && img.naturalWidth === 0) fallback();
+// Поиск работает обычной HTML-формой. JavaScript добавляет только фоновое обновление.
+const refreshButton = document.querySelector("[data-refresh]");
+const refreshStatus = document.querySelector("[data-refresh-status]");
+
+async function requestJSON(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: { Accept: "application/json", ...options.headers },
+      credentials: "same-origin",
+      cache: "no-store",
     });
-  fallbackImages();
-  const form = document.querySelector("#filters");
-  if (!form || !window.fetch || !window.AbortController) return;
-
-  const grid = document.querySelector("#artist-grid");
-  const status = document.querySelector("#result-status");
-  const errorBox = document.querySelector("#request-error");
-  let controller;
-  let sequence = 0;
-  let debounce;
-
-  function element(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text !== undefined) node.textContent = text;
-    return node;
-  }
-
-  function card(artist) {
-    const article = element("article", "artist-card");
-    const link = element("a", "card-link");
-    link.href = `/artists/${artist.id}`;
-    link.setAttribute("aria-label", `Explore ${artist.name}`);
-    const picture = element("div", "card-image");
-    const img = element("img");
-    img.src = artist.image;
-    img.alt = artist.name;
-    img.width = 400;
-    img.height = 400;
-    img.loading = "lazy";
-    const arrow = element("span", "card-arrow", "↗");
-    arrow.setAttribute("aria-hidden", "true");
-    picture.append(
-      img,
-      element(
-        "span",
-        "card-index",
-        `ARTIST / ${String(artist.id).padStart(2, "0")}`,
-      ),
-      arrow,
-    );
-    const content = element("div", "card-content");
-    const meta = element("div", "card-meta");
-    meta.append(
-      element("span", "", `EST. ${artist.creationDate}`),
-      element("span", `badge ${artist.label.toLowerCase()}`, artist.label),
-    );
-    if (artist.risingStar)
-      meta.append(element("span", "badge rising", "↗ Rising Star"));
-    const stats = element("div", "card-stats");
-    [
-      [artist.tourSpread, "countries"],
-      [artist.concertCount, "dates"],
-      [artist.score, "score"],
-    ].forEach(([value, label]) => {
-      const item = element("span", label === "score" ? "score-mini" : "");
-      item.append(
-        element("strong", "", value),
-        document.createTextNode(` ${label}`),
-      );
-      stats.append(item);
-    });
-    content.append(meta, element("h3", "", artist.name), stats);
-    link.append(picture, content);
-    article.append(link);
-    return article;
-  }
-
-  function render(data) {
-    const fragment = document.createDocumentFragment();
-    data.artists.forEach((artist) => fragment.append(card(artist)));
-    if (!data.artists.length) {
-      const empty = element("div", "empty-state");
-      const reset = element("a", "button", "Clear filters");
-      reset.href = "/";
-      empty.append(
-        element("span", "", "⌕"),
-        element("h3", "", "No matching artists."),
-        element("p", "", "Try another name, country, or activity level."),
-        reset,
-      );
-      fragment.append(empty);
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error("Слишком много запросов. Подождите немного и повторите обновление.");
+      }
+      if (response.status === 503) {
+        throw new Error("Сервис временно недоступен. Попробуйте обновить данные позже.");
+      }
+      throw new Error("Не удалось обновить данные. Сервер вернул ошибку " + response.status + ".");
     }
-    grid.replaceChildren(fragment);
-    status.textContent = `${data.matched} of ${data.total} artists`;
-    document.querySelector("#stat-artists").textContent = data.total;
-    document.querySelector("#stat-countries").textContent =
-      data.countries.length;
-    document.querySelector("#stat-dates").textContent = data.concertCount;
-    const freshness = document.querySelector("#source-line");
-    freshness.replaceChildren(
-      element("span", data.stale ? "status-dot stale-dot" : "status-dot"),
-      document.createTextNode(
-        data.stale
-          ? "Cached archive · source temporarily unavailable or updating"
-          : "Archive connected",
-      ),
-      element(
-        "span",
-        "source-time",
-        `Retrieved ${new Date(data.fetchedAt).toISOString().replace("T", " ").slice(0, 16)} UTC`,
-      ),
-    );
-    fallbackImages();
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
   }
+}
 
-  async function update(pushHistory = true) {
-    clearTimeout(debounce);
-    if (!form.reportValidity()) return;
-    if (controller) controller.abort();
-    controller = new AbortController();
-    const currentController = controller;
-    const current = ++sequence;
-    const timer = setTimeout(() => currentController.abort(), 12000);
-    const params = new URLSearchParams(new FormData(form));
-    for (const [key, value] of [...params])
-      if (!value || (key === "sort" && value === "name")) params.delete(key);
-    errorBox.hidden = true;
-    status.textContent = "Finding your frequency…";
-    grid.setAttribute("aria-busy", "true");
+function setRefreshMessage(message, isError = false) {
+  if (!refreshStatus) return;
+  refreshStatus.textContent = message;
+  refreshStatus.classList.toggle("is-error", isError);
+}
+
+if (refreshButton && refreshStatus) {
+  refreshButton.hidden = false;
+  refreshButton.addEventListener("click", async () => {
+    refreshButton.disabled = true;
+    refreshButton.setAttribute("aria-busy", "true");
+    setRefreshMessage("Загружаем четыре раздела API. Каталог остаётся доступным…");
     try {
-      const response = await fetch(`/api/artists?${params}`, {
-        signal: controller.signal,
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok)
-        throw new Error(
-          `The server returned ${response.status}. Please retry.`,
-        );
-      const data = await response.json();
-      if (current !== sequence) return;
-      render(data);
-      if (pushHistory)
-        history.pushState(null, "", params.size ? `/?${params}` : "/");
+      await requestJSON("/api/refresh", { method: "POST" });
+      const deadline = Date.now() + 60000;
+      // Сервер выполняет работу отдельно; здесь только проверяется её результат.
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        const status = await requestJSON("/api/status");
+        if (!status || typeof status.refreshing !== "boolean") {
+          throw new Error("Сервер вернул неожиданный ответ. Попробуйте проверить данные позже.");
+        }
+        if (!status.refreshing) {
+          if (status.last_error) {
+            throw new Error("Источник не ответил корректно. Сохранённые данные остаются доступны. Попробуйте позже.");
+          }
+          setRefreshMessage("Данные обновлены. Открываем свежий каталог…");
+          window.location.reload();
+          return;
+        }
+      }
+      throw new Error("Обновление занимает больше минуты. Попробуйте проверить результат позже.");
     } catch (error) {
-      if (current !== sequence) return;
-      errorBox.textContent =
-        error.name === "AbortError"
-          ? "The request took too long. Your previous results are still here. Press Explore to retry."
-          : `${error.message} Your previous results are still here.`;
-      errorBox.hidden = false;
-      status.textContent = "Results could not be updated.";
+      let message = "Нет связи с сервером. Проверьте подключение и попробуйте позже.";
+      if (error instanceof Error && error.name === "AbortError") {
+        message = "Сервер не ответил вовремя. Каталог можно продолжать просматривать.";
+      } else if (error instanceof Error && !(error instanceof TypeError) && !(error instanceof SyntaxError)) {
+        message = error.message;
+      }
+      setRefreshMessage(message, true);
     } finally {
-      clearTimeout(timer);
-      if (current === sequence) grid.removeAttribute("aria-busy");
+      refreshButton.disabled = false;
+      refreshButton.removeAttribute("aria-busy");
     }
-  }
+  });
+}
 
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    update();
-  });
-  form
-    .querySelectorAll("select")
-    .forEach((select) => select.addEventListener("change", () => update()));
-  form.querySelector("input").addEventListener("input", () => {
-    clearTimeout(debounce);
-    // Invalidate the previous request immediately, before the debounce elapses.
-    sequence++;
-    if (controller) controller.abort();
-    grid.removeAttribute("aria-busy");
-    debounce = setTimeout(() => update(), 280);
-  });
-  window.addEventListener("popstate", () => {
-    const params = new URLSearchParams(location.search);
-    for (const name of ["q", "label", "country", "sort"])
-      form.elements.namedItem(name).value =
-        params.get(name) || (name === "sort" ? "name" : "");
-    update(false);
-  });
-})();
+// Ошибка внешнего изображения не скрывает имя и данные артиста.
+for (const picture of document.querySelectorAll(".artist-image")) {
+  const showFallback = () => {
+    if (picture.hidden) return;
+    picture.hidden = true;
+    const caption = document.createElement("span");
+    caption.className = "image-fallback";
+    caption.textContent = "Изображение недоступно";
+    picture.parentElement.append(caption);
+  };
+  picture.addEventListener("error", showFallback, { once: true });
+  if (picture.complete && picture.naturalWidth === 0) showFallback();
+}

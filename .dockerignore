@@ -1,7 +1,6 @@
 .git
 bin
-tour-track
-coverage*
+coverage.out
+.cache
 .env
-*.prof
-docs
+.env.*

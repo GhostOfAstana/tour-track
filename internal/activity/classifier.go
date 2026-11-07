@@ -1,34 +1,46 @@
-// Package activity implements the subject's transparent, rule-based classifier.
-// These labels describe the supplied dataset, not an artist's present-day career.
+// Package activity оценивает концертную активность по открытым правилам из ТЗ.
+// Здесь нет обучения модели или скрытых весов: любой результат можно проверить вручную.
 package activity
 
 import (
+	"math/big"
+	"sort"
 	"strings"
 	"time"
 )
 
 const maxInt = int(^uint(0) >> 1)
 
-// Score counts countries twice, concert dates three times, and adds at most ten
-// points for career length. Integer division is intentional: 29 / 5 equals 5.
-// Invalid negative inputs become zero; extreme integers saturate, never wrap.
-func Score(tourSpread, concertCount, careerYears int) int {
-	career := min(10, max(0, careerYears)/5)
-	spread := max(0, tourSpread)
-	concerts := max(0, concertCount)
-	if spread > (maxInt-career)/2 {
-		return maxInt
-	}
-	total := spread*2 + career
-	if concerts > (maxInt-total)/3 {
-		return maxInt
-	}
-	return total + concerts*3
+// Result хранит не только итог, но и исходные числа для объяснения результата.
+type Result struct {
+	Label          string   `json:"label"`
+	Score          int      `json:"score"`
+	TourSpread     int      `json:"tour_spread"`
+	ConcertCount   int      `json:"concert_count"`
+	CareerYears    int      `json:"career_years"`
+	RecentConcerts int      `json:"recent_concerts"`
+	RisingStar     bool     `json:"rising_star"`
+	Countries      []string `json:"countries"`
+	InvalidDates   int      `json:"invalid_dates"`
 }
 
-// Classify returns exactly one of the four labels required by the subject.
+// Score вычисляет 2 × страны + 3 × концерты + min(10, годы / 5).
+// Деление целочисленное: неполные пятилетия не дают дополнительного балла.
+// Отрицательные значения считаются нулём. Переполнение насыщается максимумом int.
+func Score(tourSpread, concertCount, careerYears int) int {
+	countries := positive(tourSpread)
+	concerts := positive(concertCount)
+	careerBonus := min(10, positive(careerYears)/5)
+	return add(add(multiply(countries, 2), multiply(concerts, 3)), careerBonus)
+}
+
+// Classify возвращает одну из четырёх меток с точными границами из ТЗ.
 func Classify(tourSpread, concertCount, careerYears int) string {
-	switch score := Score(tourSpread, concertCount, careerYears); {
+	return label(Score(tourSpread, concertCount, careerYears))
+}
+
+func label(score int) string {
+	switch {
 	case score <= 10:
 		return "Emerging"
 	case score <= 25:
@@ -40,34 +52,111 @@ func Classify(tourSpread, concertCount, careerYears int) string {
 	}
 }
 
-// ParseDate accepts the API's day-month-year format and its optional * marker.
-func ParseDate(value string) (time.Time, error) {
-	return time.Parse("02-01-2006", strings.TrimPrefix(strings.TrimSpace(value), "*"))
-}
-
-// IsRisingStar compares a two-year rate with the lifetime rate. A strict > is
-// required: exactly 50% higher is not a Rising Star. A zero-length career has no
-// defined lifetime rate, so it is not flagged.
-func IsRisingStar(recentConcerts, concertCount, careerYears int) bool {
-	if recentConcerts <= 0 || concertCount <= 0 || careerYears <= 0 || recentConcerts > concertCount {
-		return false
-	}
-	return float64(recentConcerts)/2 > (float64(concertCount)/float64(careerYears))*1.5
-}
-
-// RecentCount uses a rolling two-calendar-year window, inclusive at both ends.
-// Dates are calendar days in UTC. Future concerts and malformed dates do not
-// count as completed recent activity; repeated dates remain separate entries.
-func RecentCount(dates []string, now time.Time) int {
-	now = now.UTC()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	start := today.AddDate(-2, 0, 0)
-	count := 0
-	for _, raw := range dates {
-		date, err := ParseDate(raw)
-		if err == nil && !date.Before(start) && !date.After(today) {
-			count++
+// Countries извлекает страну после последнего дефиса в «город-страна».
+// Пустые и неполные записи не создают выдуманную страну.
+// Небольшой список синонимов объединяет распространённые обозначения одной страны.
+func Countries(locations []string) []string {
+	unique := make(map[string]struct{}, len(locations))
+	for _, location := range locations {
+		location = strings.TrimSpace(location)
+		separator := strings.LastIndexByte(location, '-')
+		if separator <= 0 || separator == len(location)-1 {
+			continue
+		}
+		country := strings.ToLower(strings.TrimSpace(location[separator+1:]))
+		country = strings.Join(strings.Fields(strings.ReplaceAll(country, "_", " ")), " ")
+		switch country {
+		case "usa", "united states", "united states of america":
+			country = "usa"
+		case "uk", "united kingdom":
+			country = "uk"
+		case "brasil", "brazil":
+			country = "brazil"
+		}
+		if country != "" {
+			unique[country] = struct{}{}
 		}
 	}
-	return count
+	countries := make([]string, 0, len(unique))
+	for country := range unique {
+		countries = append(countries, country)
+	}
+	sort.Strings(countries)
+	return countries
+}
+
+// IsRisingStar сравнивает среднее за два года со средним за всю карьеру.
+// Строгое условие recent / 2 > (total / years) × 1,5 равносильно
+// recent × years > total × 3. big.Int сохраняет точность даже на границе int.
+// При нулевом стаже среднего за карьеру ещё нет, поэтому метка не выдаётся.
+func IsRisingStar(concertCount, recentConcerts, careerYears int) bool {
+	if concertCount <= 0 || recentConcerts <= 0 || careerYears <= 0 {
+		return false
+	}
+	recent := new(big.Int).Mul(big.NewInt(int64(recentConcerts)), big.NewInt(int64(careerYears)))
+	average := new(big.Int).Mul(big.NewInt(int64(concertCount)), big.NewInt(3))
+	return recent.Cmp(average) > 0
+}
+
+// Analyze применяет правила к данным артиста на момент конкретного запроса.
+// Каждая запись dates считается концертом, включая повторные даты: в один день
+// могут проходить разные выступления. Некорректные даты входят в общий счётчик
+// записей API, но не в недавние концерты; их число видно в InvalidDates.
+func Analyze(locations []string, dates []string, creationYear int, now time.Time) Result {
+	countries := Countries(locations)
+	careerYears := difference(now.Year(), creationYear)
+	result := Result{
+		TourSpread:   len(countries),
+		ConcertCount: len(dates),
+		CareerYears:  careerYears,
+		Countries:    countries,
+	}
+	// Сравниваются календарные даты в часовом поясе запроса. Концерты сегодня
+	// включаются целиком; будущие даты не показывают уже состоявшееся ускорение.
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	windowStart := today.AddDate(-2, 0, 0)
+	for _, raw := range dates {
+		value := strings.TrimSpace(raw)
+		value = strings.TrimPrefix(value, "*")
+		date, err := time.ParseInLocation("02-01-2006", value, now.Location())
+		if err != nil {
+			result.InvalidDates++
+			continue
+		}
+		if !date.Before(windowStart) && !date.After(today) {
+			result.RecentConcerts++
+		}
+	}
+	result.Score = Score(result.TourSpread, result.ConcertCount, result.CareerYears)
+	result.Label = label(result.Score)
+	result.RisingStar = IsRisingStar(result.ConcertCount, result.RecentConcerts, result.CareerYears)
+	return result
+}
+
+func positive(value int) int {
+	return max(0, value)
+}
+
+func multiply(value, weight int) int {
+	if value > maxInt/weight {
+		return maxInt
+	}
+	return value * weight
+}
+
+func add(left, right int) int {
+	if left > maxInt-right {
+		return maxInt
+	}
+	return left + right
+}
+
+func difference(year, creationYear int) int {
+	if creationYear >= year {
+		return 0
+	}
+	if creationYear < 0 && year > maxInt+creationYear {
+		return maxInt
+	}
+	return year - creationYear
 }

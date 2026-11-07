@@ -13,80 +13,86 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/GhostOfAstana/tour-track/internal/catalog"
-	"github.com/GhostOfAstana/tour-track/internal/web"
+	"tour-track/internal/cache"
+	"tour-track/internal/catalog"
+	"tour-track/internal/seed"
+	"tour-track/internal/web"
 )
 
-type config struct{ address, apiURL string }
-
-func readConfig(getenv func(string) string) (config, error) {
-	port := getenv("PORT")
-	if port == "" {
-		port = "8080"
+func main() {
+	if err := run(); err != nil {
+		slog.Error("сервер остановлен", "error", err)
+		os.Exit(1)
 	}
-	number, err := strconv.Atoi(port)
-	if err != nil || number < 1 || number > 65535 {
-		return config{}, fmt.Errorf("PORT must be an integer from 1 to 65535")
-	}
-	host := getenv("HOST")
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	base := getenv("API_BASE_URL")
-	if base == "" {
-		base = "https://groupietrackers.herokuapp.com/api"
-	}
-	return config{address: net.JoinHostPort(host, port), apiURL: base}, nil
 }
 
-func run(ctx context.Context, c config) error {
-	client, err := catalog.NewClient(c.apiURL, 8*time.Second)
+func run() error {
+	cfg, err := readConfig()
 	if err != nil {
 		return err
 	}
-	cache, err := catalog.NewCache(ctx, client, catalog.DefaultCacheOptions())
+	source, err := catalog.NewClient(cfg.apiURL, nil)
 	if err != nil {
 		return err
 	}
-	handler, err := web.New(cache)
+	artists, capturedAt, err := seed.Load()
+	if err != nil {
+		return fmt.Errorf("резервный каталог: %w", err)
+	}
+	store := cache.New(source, artists, capturedAt)
+	app, err := web.New(store, slog.Default())
 	if err != nil {
 		return err
 	}
-	listener, err := net.Listen("tcp", c.address)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go store.Run(ctx, 5*time.Minute)
+	store.RequestRefresh()
+	server := &http.Server{Addr: cfg.address, Handler: app, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	listener, err := net.Listen("tcp", cfg.address)
 	if err != nil {
-		return fmt.Errorf("listen %s: %w", c.address, err)
+		return fmt.Errorf("открыть порт HTTP: %w", err)
 	}
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
-	finished := make(chan error, 1)
-	go func() { finished <- server.Serve(listener) }()
-	slog.Info("tour-track ready", "address", listener.Addr().String())
+	failures := make(chan error, 1)
+	go func() { failures <- server.Serve(listener) }()
+	slog.Info("Tour Track запущен", "address", listener.Addr().String(), "artists", len(artists))
 	select {
-	case err := <-finished:
+	case err := <-failures:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("запуск HTTP: %w", err)
 	case <-ctx.Done():
+		// Новый контекст даёт текущим посетителям время закончить ответ после SIGTERM.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			_ = server.Close()
-			return fmt.Errorf("shutdown: %w", err)
+			return fmt.Errorf("остановка HTTP: %w", err)
 		}
 		return nil
 	}
 }
 
-func main() {
-	c, err := readConfig(os.Getenv)
-	if err != nil {
-		slog.Error("configuration error", "error", err)
-		os.Exit(1)
+type config struct{ address, apiURL string }
+
+func readConfig() (config, error) {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := run(ctx, c); err != nil {
-		slog.Error("server stopped", "error", err)
-		os.Exit(1)
+	if port == "0" {
+		return config{}, errors.New("PORT должен быть номером от 1 до 65535")
 	}
+	parsedPort, err := strconv.Atoi(port)
+	if err != nil || parsedPort < 1 || parsedPort > 65535 {
+		return config{}, errors.New("PORT должен быть номером от 1 до 65535")
+	}
+	// HOST=127.0.0.1 подходит для локальной проверки; на хостинге нужен весь интерфейс.
+	host := os.Getenv("HOST")
+	apiURL := os.Getenv("API_BASE_URL")
+	if apiURL == "" {
+		apiURL = "https://groupietrackers.herokuapp.com/api"
+	}
+	return config{address: net.JoinHostPort(host, strconv.Itoa(parsedPort)), apiURL: apiURL}, nil
 }

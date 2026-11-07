@@ -2,269 +2,229 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"reflect"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 )
 
-// This is a recorded API response, not production fallback data. Tests never
-// need the public API, so outages cannot make the audit nondeterministic.
-func fixtureHandler(t *testing.T) http.Handler {
-	t.Helper()
-	return http.FileServer(http.Dir("testdata"))
+func fixture() map[string]string {
+	return map[string]string{
+		"/artists":   `[{"id":7,"name":"Queen","image":"https://example.org/queen.jpg","members":["Freddie Mercury","John Daecon"],"creationDate":1970,"firstAlbum":"13-07-1973","locations":"https://untrusted.invalid/never-follow"}]`,
+		"/locations": `{"index":[{"id":7,"locations":["london-uk","boston-usa"],"dates":"https://untrusted.invalid/never-follow"}]}`,
+		"/dates":     `{"index":[{"id":7,"dates":["*01-01-2025","02-01-2025","02-01-2025"]}]}`,
+		"/relation":  `{"index":[{"id":7,"datesLocations":{"london-uk":["02-01-2025","02-01-2025"],"boston-usa":["*01-01-2025"]}}]}`,
+	}
 }
 
-func fixtureServer(t *testing.T, override func(http.ResponseWriter, *http.Request) bool) *httptest.Server {
+func testClient(t *testing.T, handler http.Handler) *Client {
 	t.Helper()
-	files := fixtureHandler(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if override != nil && override(w, r) {
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	client, err := NewClient(server.URL, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+func TestFetchJoinsAllFourParts(t *testing.T) {
+	data := fixture()
+	var mu sync.Mutex
+	calls := make(map[string]int)
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.Header.Get("Accept") != "application/json" {
+			t.Errorf("неверный запрос: %s, Accept=%s", r.Method, r.Header.Get("Accept"))
+		}
+		mu.Lock()
+		calls[r.URL.Path]++
+		mu.Unlock()
+		body, exists := data[r.URL.Path]
+		if !exists {
+			t.Errorf("неожиданный адрес: %s", r.URL.Path)
+			http.NotFound(w, r)
 			return
 		}
-		r.URL.Path += ".json"
-		files.ServeHTTP(w, r)
+		fmt.Fprint(w, body)
 	}))
-	t.Cleanup(server.Close)
-	return server
-}
-
-func TestLoadAllFourAndAuditRecords(t *testing.T) {
-	var count atomic.Int64
-	server := fixtureServer(t, func(w http.ResponseWriter, r *http.Request) bool { count.Add(1); return false })
-	client, _ := NewClient(server.URL, time.Second)
-	artists, err := client.Load(context.Background())
+	artists, err := client.Fetch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(artists) != 52 || count.Load() != 4 {
-		t.Fatalf("artists=%d requests=%d", len(artists), count.Load())
+	if len(artists) != 1 {
+		t.Fatalf("число исполнителей: %d", len(artists))
 	}
-	byName := map[string]Artist{}
-	for _, a := range artists {
-		byName[a.Name] = a
+	artist := artists[0]
+	if artist.ID != 7 || artist.Name != "Queen" || artist.FirstAlbum != "13-07-1973" || artist.CreationDate != 1970 || artist.Image != "https://example.org/queen.jpg" {
+		t.Fatalf("потеряны исходные поля: %+v", artist)
 	}
-	wantQueen := []string{"Freddie Mercury", "Brian May", "John Daecon", "Roger Meddows-Taylor", "Mike Grose", "Barry Mitchell", "Doug Fogie"}
-	if !reflect.DeepEqual(byName["Queen"].Members, wantQueen) {
-		t.Fatal("Queen members differ from subject")
+	if !reflect.DeepEqual(artist.Members, []string{"Freddie Mercury", "John Daecon"}) || !reflect.DeepEqual(artist.Locations, []string{"london-uk", "boston-usa"}) || !reflect.DeepEqual(artist.Dates, []string{"*01-01-2025", "02-01-2025", "02-01-2025"}) {
+		t.Fatalf("изменены исходные строки или дубликаты: %+v", artist)
 	}
-	if byName["Gorillaz"].FirstAlbum != "26-03-2001" {
-		t.Fatal("Gorillaz first album differs")
+	wantConcerts := []Concert{{Location: "boston-usa", Dates: []string{"*01-01-2025"}}, {Location: "london-uk", Dates: []string{"02-01-2025", "02-01-2025"}}}
+	if !reflect.DeepEqual(artist.Concerts, wantConcerts) {
+		t.Fatalf("связи мест и дат: %+v", artist.Concerts)
 	}
-	wantFoo := []string{"Dave Grohl", "Nate Mendel", "Taylor Hawkins", "Chris Shiflett", "Pat Smear", "Rami Jaffee"}
-	if !reflect.DeepEqual(byName["Foo Fighters"].Members, wantFoo) {
-		t.Fatal("Foo Fighters members differ")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 4 {
+		t.Fatalf("ожидались четыре адреса, получено: %+v", calls)
 	}
-	wantTravis := []string{"santiago-chile", "sao_paulo-brasil", "los_angeles-usa", "houston-usa", "atlanta-usa", "new_orleans-usa", "philadelphia-usa", "london-uk", "frauenfeld-switzerland", "turku-finland"}
-	gotTravis := append([]string(nil), byName["Travis Scott"].Locations...)
-	for i := range wantTravis {
-		wantTravis[i] = strings.ReplaceAll(wantTravis[i], "-brasil", "-brazil")
-		gotTravis[i] = strings.ReplaceAll(gotTravis[i], "-brasil", "-brazil")
-	}
-	if !reflect.DeepEqual(gotTravis, wantTravis) {
-		t.Fatal("Travis locations differ")
-	}
-	now := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
-	travis := Enrich(byName["Travis Scott"], now)
-	if travis.Label != "Legendary" || travis.TourSpread != 6 || travis.ConcertCount != 12 || travis.Score != 51 {
-		t.Fatalf("Travis: %+v", travis)
-	}
-	foo := Enrich(byName["Foo Fighters"], now)
-	if foo.ConcertCount != 8 || len(foo.UnlinkedDates) != 1 {
-		t.Fatalf("unlinked date lost: %+v", foo)
-	}
-	if got := byName["Queen"].Concerts[0]; got.Location != "dunedin-new_zealand" || got.Dates[0] != "10-02-2020" {
-		t.Fatalf("bad join: %+v", got)
+	for path, count := range calls {
+		if count != 1 {
+			t.Errorf("%s запрошен %d раз", path, count)
+		}
 	}
 }
 
-func TestClientFailures(t *testing.T) {
-	for _, tc := range []struct {
-		name, body string
-		status     int
-	}{
-		{"upstream 500", "", 500}, {"upstream rate limit", "", 429}, {"redirect", "", 302},
-		{"invalid JSON", "{", 200}, {"trailing JSON", "[] {}", 200}, {"wrong schema", "{}", 200}, {"empty", "[]", 200},
-		{"null", "null", 200}, {"oversized", strings.Repeat(" ", MaxResponseBytes+1), 200},
-		{"duplicate artist", `[{"id":1,"name":"A","creationDate":2000,"firstAlbum":"01-01-2000"},{"id":1,"name":"B","creationDate":2000,"firstAlbum":"01-01-2000"}]`, 200},
-		{"invalid artist", `[{"id":-1,"name":"","creationDate":0}]`, 200},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			server := fixtureServer(t, func(w http.ResponseWriter, r *http.Request) bool {
-				if r.URL.Path != "/artists" {
-					return false
-				}
-				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(tc.body))
-				return true
-			})
-			client, _ := NewClient(server.URL, time.Second)
-			if artists, err := client.Load(context.Background()); err == nil || artists != nil {
-				t.Fatal("bad upstream data accepted")
-			}
-		})
-	}
-}
-
-func TestJoinRejectsBrokenIDsAndDates(t *testing.T) {
-	for _, tc := range []struct{ name, path, body string }{
-		{"missing location", "/locations", `{"index":[]}`},
-		{"unknown id", "/locations", `{"index":[{"id":999}]}`},
-		{"duplicate location", "/locations", `{"index":[{"id":1},{"id":1}]}`},
-		{"invalid location", "/locations", `{"index":[{"id":1,"locations":["not_a_location"]}]}`},
-		{"invalid date", "/dates", `{"index":[{"id":1,"dates":["31-02-2020"]}]}`},
-		{"missing dates", "/dates", `{"index":[]}`},
-		{"unknown dates id", "/dates", `{"index":[{"id":999}]}`},
-		{"missing relation", "/relation", `{"index":[]}`},
-		{"unknown relation id", "/relation", `{"index":[{"id":999}]}`},
-		{"invalid relation date", "/relation", `{"index":[{"id":1,"datesLocations":{"city-usa":["invalid"]}}]}`},
-		{"invalid relation location", "/relation", `{"index":[{"id":1,"datesLocations":{"invalid":[]}}]}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			server := fixtureServer(t, func(w http.ResponseWriter, r *http.Request) bool {
-				if r.URL.Path != tc.path {
-					return false
-				}
-				_, _ = fmt.Fprint(w, tc.body)
-				return true
-			})
-			client, _ := NewClient(server.URL, time.Second)
-			if _, err := client.Load(context.Background()); err == nil {
-				t.Fatal("invalid join accepted")
-			}
-		})
-	}
-}
-
-func TestClientTimeoutAndCancellation(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
-	defer server.Close()
-	client, _ := NewClient(server.URL, 25*time.Millisecond)
-	start := time.Now()
-	if _, err := client.Load(context.Background()); err == nil {
-		t.Fatal("timeout missing")
-	}
-	if time.Since(start) > time.Second {
-		t.Fatal("timeout was unbounded")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := client.Load(ctx); err == nil {
-		t.Fatal("cancellation ignored")
-	}
-}
-
-func TestParallelFetch(t *testing.T) {
-	arrived := make(chan struct{}, 4)
-	release := make(chan struct{})
-	server := fixtureServer(t, func(w http.ResponseWriter, r *http.Request) bool {
-		arrived <- struct{}{}
+func TestFetchRunsRequestsInParallel(t *testing.T) {
+	data := fixture()
+	var mu sync.Mutex
+	arrived := 0
+	allArrived := make(chan struct{})
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		arrived++
+		if arrived == 4 {
+			close(allArrived)
+		}
+		mu.Unlock()
 		select {
-		case <-release:
+		case <-allArrived:
+			fmt.Fprint(w, data[r.URL.Path])
 		case <-r.Context().Done():
 		}
-		return false
-	})
-	client, _ := NewClient(server.URL, time.Second)
-	done := make(chan error, 1)
-	go func() { _, err := client.Load(context.Background()); done <- err }()
-	for range 4 {
-		select {
-		case <-arrived:
-		case <-time.After(time.Second):
-			close(release)
-			t.Fatal("requests were not concurrent")
-		}
-	}
-	close(release)
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	}))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := client.Fetch(ctx); err != nil {
+		t.Fatalf("все четыре запроса должны дойти до барьера одновременно: %v", err)
 	}
 }
 
-func TestConfigurationAndImageSafety(t *testing.T) {
-	for _, base := range []string{"", ":bad", "ftp://example.org", "https://user:pass@example.org", "https://example.org?q=1", "https://example.org/#x"} {
-		if _, err := NewClient(base, time.Second); err == nil {
-			t.Errorf("accepted %s", base)
-		}
+func TestFetchRejectsBrokenSnapshots(t *testing.T) {
+	tests := []struct {
+		name string
+		part string
+		body string
+	}{
+		{"сломанный JSON", "/artists", `[{`},
+		{"второй документ", "/artists", fixture()["/artists"] + `{}`},
+		{"мусор после документа", "/dates", fixture()["/dates"] + ` trailing`},
+		{"пустой каталог", "/artists", `[]`},
+		{"null вместо каталога", "/artists", `null`},
+		{"нулевой id", "/artists", `[{"id":0,"name":"Queen"}]`},
+		{"пустое имя", "/artists", `[{"id":7,"name":"  "}]`},
+		{"дубликат исполнителя", "/artists", `[{"id":7,"name":"One"},{"id":7,"name":"Two"}]`},
+		{"неизвестный id", "/dates", `{"index":[{"id":8,"dates":[]}]}`},
+		{"дубликат locations", "/locations", `{"index":[{"id":7,"locations":[]},{"id":7,"locations":[]}]}`},
+		{"дубликат dates", "/dates", `{"index":[{"id":7,"dates":[]},{"id":7,"dates":[]}]}`},
+		{"дубликат relation", "/relation", `{"index":[{"id":7,"datesLocations":{}},{"id":7,"datesLocations":{}}]}`},
+		{"пропущены locations", "/locations", `{"index":[]}`},
+		{"пропущены dates", "/dates", `{"index":[]}`},
+		{"пропущены relation", "/relation", `{"index":[]}`},
+		{"null locations", "/locations", `{"index":[{"id":7,"locations":null}]}`},
+		{"null dates", "/dates", `{"index":[{"id":7,"dates":null}]}`},
+		{"null relation", "/relation", `{"index":[{"id":7,"datesLocations":null}]}`},
+		{"null даты места", "/relation", `{"index":[{"id":7,"datesLocations":{"london-uk":null}}]}`},
+		{"слишком большой ответ", "/dates", strings.Repeat(" ", maxResponseBytes+1)},
 	}
-	if _, err := NewClient("https://example.org", 0); err == nil {
-		t.Fatal("zero timeout accepted")
-	}
-	for _, raw := range []string{"javascript:alert(1)", "https://evil.test/a.png", "//evil.test/x", "https://groupietrackers.herokuapp.com.evil.test/api/images/x", "https://groupietrackers.herokuapp.com/x"} {
-		if safeImage(raw) != "/static/artist.svg" {
-			t.Errorf("unsafe image %q", raw)
-		}
-	}
-	valid := "https://groupietrackers.herokuapp.com/api/images/queen.jpeg"
-	if safeImage(valid) != valid {
-		t.Fatal("valid image rejected")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			data := fixture()
+			data[test.part] = test.body
+			client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, data[r.URL.Path])
+			}))
+			artists, err := client.Fetch(context.Background())
+			if err == nil || artists != nil {
+				t.Fatalf("повреждённый снимок должен быть отвергнут целиком: artists=%+v, err=%v", artists, err)
+			}
+		})
 	}
 }
 
-func TestJoinUsesIDsNotArrayPositions(t *testing.T) {
-	data, err := os.ReadFile("testdata/locations.json")
+func TestFetchAllowsArtistWithoutConcerts(t *testing.T) {
+	data := fixture()
+	data["/locations"] = `{"index":[{"id":7,"locations":[]}]}`
+	data["/dates"] = `{"index":[{"id":7,"dates":[]}]}`
+	data["/relation"] = `{"index":[{"id":7,"datesLocations":{}}]}`
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, data[r.URL.Path]) }))
+	artists, err := client.Fetch(context.Background())
+	if err != nil || len(artists) != 1 || len(artists[0].Dates) != 0 || len(artists[0].Concerts) != 0 {
+		t.Fatalf("корректный исполнитель без концертов не должен теряться: %+v, %v", artists, err)
+	}
+}
+
+func TestFetchRejectsHTTPError(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	if artists, err := client.Fetch(context.Background()); err == nil || artists != nil || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("HTTP 503 должен стать ошибкой без частичного результата: %+v, %v", artists, err)
+	}
+}
+
+func TestFetchCancellation(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if artists, err := client.Fetch(ctx); err == nil || artists != nil {
+		t.Fatalf("отменённый запрос должен завершиться ошибкой: %+v, %v", artists, err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("отмена запроса не сработала своевременно")
+	}
+}
+
+func TestFetchTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer server.Close()
+	httpClient := server.Client()
+	httpClient.Timeout = 30 * time.Millisecond
+	client, err := NewClient(server.URL, httpClient)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var raw struct {
-		Index []json.RawMessage `json:"index"`
+	if artists, err := client.Fetch(context.Background()); err == nil || artists != nil {
+		t.Fatalf("тайм-аут должен стать ошибкой: %+v, %v", artists, err)
 	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatal(err)
-	}
-	for i, j := 0, len(raw.Index)-1; i < j; i, j = i+1, j-1 {
-		raw.Index[i], raw.Index[j] = raw.Index[j], raw.Index[i]
-	}
-	encoded, _ := json.Marshal(raw)
-	server := fixtureServer(t, func(w http.ResponseWriter, r *http.Request) bool {
-		if r.URL.Path != "/locations" {
-			return false
+}
+
+func TestNewClientURLValidation(t *testing.T) {
+	for _, address := range []string{"", "://", "file:///etc/passwd", "ftp://example.org", "https:///missing-host", "https://user:secret@example.org", "https://example.org?key=value", "https://example.org#fragment"} {
+		if _, err := NewClient(address, nil); err == nil {
+			t.Errorf("принят неверный адрес: %q", address)
 		}
-		_, _ = w.Write(encoded)
-		return true
-	})
-	client, _ := NewClient(server.URL, time.Second)
-	artists, err := client.Load(context.Background())
+	}
+	original := &http.Client{}
+	client, err := NewClient("https://example.org/api/", original)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if artists[0].Name != "Queen" || artists[0].Locations[0] != "north_carolina-usa" {
-		t.Fatal("records linked by position")
+	if original.Timeout != 0 || client.http.Timeout <= 0 || client.baseURL != "https://example.org/api" {
+		t.Fatalf("неверные настройки клиента: original=%+v, client=%+v", original, client)
 	}
 }
 
-func TestCountryAndRequestYear(t *testing.T) {
-	for raw, want := range map[string]string{"sao_paulo-brasil": "brazil", "city-usa": "usa", "city-united_states": "usa", "city-with-dashes-new_zealand": "new_zealand", " LONDON-UK ": "uk", "invalid": "", "city-": ""} {
-		if got := Country(raw); got != want {
-			t.Errorf("Country(%q)=%q want %q", raw, got, want)
-		}
+func TestFetchConcurrentCalls(t *testing.T) {
+	data := fixture()
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, data[r.URL.Path]) }))
+	var wg sync.WaitGroup
+	for range 12 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			artists, err := client.Fetch(context.Background())
+			if err != nil || len(artists) != 1 {
+				t.Errorf("параллельная загрузка: %+v, %v", artists, err)
+			}
+		}()
 	}
-	a := Artist{CreationDate: 2000, Locations: []string{"city-usa", "other-usa", "third-us", "x-uk"}, Dates: []string{"01-01-2024"}}
-	before := Enrich(a, time.Date(2024, 12, 31, 0, 0, 0, 0, time.UTC))
-	after := Enrich(a, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
-	if after.CareerYears != 25 || before.CareerYears != 24 || after.Score != before.Score+1 || after.TourSpread != 2 {
-		t.Fatal("request year or country deduplication wrong")
-	}
-	future := Enrich(Artist{CreationDate: 2099}, time.Now())
-	if future.CareerYears != 0 || future.Label != "Emerging" {
-		t.Fatal("negative career not handled")
-	}
-}
-
-func FuzzCountry(f *testing.F) {
-	f.Add("city-usa")
-	f.Add("")
-	f.Fuzz(func(t *testing.T, raw string) {
-		got := Country(raw)
-		if Country(raw) != got {
-			t.Fatal("not deterministic")
-		}
-	})
+	wg.Wait()
 }

@@ -1,156 +1,51 @@
-{{define "index"}}{{template "head" .}}
-<main id="main" class="shell">
-  <section class="hero" aria-labelledby="hero-title">
-    <div class="hero-copy">
-      <p class="eyebrow">
-        <span class="mini-cross" aria-hidden="true">+</span> THE ARTIST & TOUR
-        ARCHIVE
-      </p>
-      <h1 id="hero-title">Music in<br /><span class="accent">motion.</span></h1>
-      <p class="hero-description">
-        Every artist has a trajectory.<br />Explore the people, places, and
-        performances behind it.
-      </p>
-      <a class="text-link" href="#directory"
-        >Find your frequency <span aria-hidden="true">↓</span></a
-      >
-    </div>
-    <div class="hero-art" aria-hidden="true">
-      <div class="radar-label">SIGNAL / WORLDWIDE</div>
-      <div class="record">
-        <div class="record-label">
-          <span>TT</span><small>SIDE A · IN MOTION</small>
-        </div>
-        <i class="record-hole"></i>
-      </div>
-      <div class="orbit-point point-one"></div>
-      <div class="orbit-point point-two"></div>
-      <div class="orbit-line"></div>
-      <div class="record-caption">
-        <span>DISCIPLINE.<br />RHYTHM. REPEAT.</span
-        ><span>51° N<br />71° E</span>
-      </div>
-    </div>
-  </section>
-  <section class="stat-strip" aria-label="Archive statistics">
-    <div>
-      <strong id="stat-artists">{{.Total}}</strong
-      ><span>ARTISTS IN THE ARCHIVE</span>
-    </div>
-    <div>
-      <strong id="stat-countries">{{len .Countries}}</strong
-      ><span>COUNTRIES REACHED</span>
-    </div>
-    <div>
-      <strong id="stat-dates">{{.ConcertCount}}</strong
-      ><span>RECORDED CONCERT DATES</span>
-    </div>
-    <a href="/about#method"
-      ><span class="stat-icon" aria-hidden="true">✳</span
-      ><span
-        >ACTIVITY, EXPLAINED<br /><small
-          >Transparent scores. No black box. ↗</small
-        ></span
-      ></a
-    >
-  </section>
-  <section id="directory" class="directory" aria-labelledby="directory-title">
-    <div class="section-top">
-      <div>
-        <p class="eyebrow">01 / THE DIRECTORY</p>
-        <h2 id="directory-title">Find your next deep dive.</h2>
-      </div>
-      <p class="subtle">From first releases to worldwide stages.</p>
-    </div>
-    <form action="/" method="get" id="filters" class="filters" role="search">
-      <div class="search-field">
-        <label class="sr-only" for="q">Search artists, members or places</label
-        ><span aria-hidden="true">⌕</span
-        ><input
-          type="search"
-          id="q"
-          name="q"
-          maxlength="200"
-          value="{{.Filters.Query}}"
-          placeholder="Search artists, members or places…"
-          autocomplete="off"
-        />
-      </div>
-      <div class="select-field">
-        <label for="label">Activity</label
-        ><select id="label" name="label">
-          <option value="">All activity</option>
-          <option {{if eq .Filters.Label "Emerging"}}selected{{end}}>Emerging</option>
-          <option {{if eq .Filters.Label "Active"}}selected{{end}}>Active</option>
-          <option {{if eq .Filters.Label "Established"}}selected{{end}}>Established</option>
-          <option {{if eq .Filters.Label "Legendary"}}selected{{end}}>Legendary</option>
-          <option {{if eq .Filters.Label "Rising Star"}}selected{{end}}>Rising Star</option>
-        </select>
-      </div>
-      <div class="select-field">
-        <label for="country">Country</label
-        ><select id="country" name="country">
-          <option value="">Everywhere</option>
-          {{range .Countries}}
-          <option value="{{.}}" {{if eq $.Filters.Country .}}selected{{end}}>{{place .}}</option>
-          {{end}}
-        </select>
-      </div>
-      <div class="select-field">
-        <label for="sort">Sort by</label
-        ><select id="sort" name="sort">
-          <option value="name" {{if eq .Filters.Sort "name"}}selected{{end}}>Name A–Z</option>
-          <option value="score" {{if eq .Filters.Sort "score"}}selected{{end}}>Activity score</option>
-          <option value="newest" {{if eq .Filters.Sort "newest"}}selected{{end}}>Newest formed</option>
-        </select>
-      </div>
-      <button class="button filter-submit" type="submit">
-        Explore <span aria-hidden="true">↗</span>
-      </button>
-    </form>
-    <div class="results-bar">
-      <p id="result-status" role="status" aria-live="polite">
-        {{.Matched}} of {{.Total}} artists
-      </p>
-      <a href="/" id="reset-filters"
-        >Reset filters <span aria-hidden="true">↺</span></a
-      >
-    </div>
-    <div
-      id="request-error"
-      class="notice error-notice"
-      role="alert"
-      hidden
-    ></div>
-    <div id="artist-grid" class="artist-grid">
-      {{range .Artists}}{{template "card" .}}{{else}}
-      <div class="empty-state">
-        <span aria-hidden="true">⌕</span>
-        <h3>No matching artists.</h3>
-        <p>Try another name, country, or activity level.</p>
-        <a class="button" href="/">Clear filters</a>
-      </div>
+{{define "index"}}<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#131514">
+  <meta name="description" content="Афиша артистов, география концертов и понятный расчёт их гастрольной активности.">
+  <title>{{.Title}} — tour-track</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Перейти к артистам</a>
+  <header class="site-header wrap">
+    <a class="brand" href="/" aria-label="tour-track — главная"><span class="brand-mark" aria-hidden="true">↗</span> tour-track<span class="brand-dot" aria-hidden="true">●</span></a>
+    <div class="header-right"><span class="header-note">Музыка. Города. Движение.</span><button class="button button-small" data-refresh type="button" hidden>Обновить данные <span aria-hidden="true">↻</span></button></div>
+  </header>
+  <main id="content" class="wrap">
+    <div class="refresh-status" data-refresh-status role="status" aria-live="polite"></div>
+    {{if .Stale}}<div class="notice" role="status"><strong>Свежие данные API не подтверждены.</strong> Показываем сохранённый каталог; при первом запуске используется резервная копия. Время сохранённого каталога: {{.Updated}}. Сведения источника могли измениться.</div>{{end}}
+    <section class="hero" aria-labelledby="page-title">
+      <div><p class="eyebrow"><span class="signal" aria-hidden="true"></span> Гастрольный атлас</p><h1 id="page-title">У музыки<br>нет границ<span class="accent">.</span></h1><p class="hero-description">Откройте артистов, проследите маршруты концертов и узнайте, как гастроли превращаются в индекс активности.</p></div>
+      <div class="hero-side"><div class="orbit" aria-hidden="true"><span class="orbit-inner">♪</span><span class="orbit-point"></span></div><div class="hero-number">{{.Total}}<span>артистов в каталоге</span></div></div>
+    </section>
+    <section class="catalog" aria-labelledby="catalog-title">
+      <div class="section-heading"><h2 id="catalog-title">На вашей волне</h2><span class="updated">Каталог сохранён: {{.Updated}}</span></div>
+      <form class="filters" action="/" method="get" role="search">
+        <div class="field search-field"><label for="query">Артист, участник или страна</label><input id="query" name="q" type="search" value="{{.Query}}" placeholder="Например, Queen" maxlength="200" autocomplete="off"></div>
+        <div class="field"><label for="label">Активность</label><select id="label" name="label"><option value="">Все уровни</option value="Emerging" {{if eq .Label "Emerging"}}selected{{end}}>Emerging</option><option value="Active" {{if eq .Label "Active"}}selected{{end}}>Active</option><option value="Established" {{if eq .Label "Established"}}selected{{end}}>Established</option><option value="Legendary" {{if eq .Label "Legendary"}}selected{{end}}>Legendary</option><option value="Rising Star" {{if eq .Label "Rising Star"}}selected{{end}}>Rising Star</option></select></div>
+        <div class="field"><label for="sort">Порядок</label><select id="sort" name="sort"><option value="name" {{if eq .Sort "name"}}selected{{end}}>По имени</option><option value="score" {{if eq .Sort "score"}}selected{{end}}>По активности</option><option value="year" {{if eq .Sort "year"}}selected{{end}}>По году основания</option></select></div>
+        <button class="button button-primary" type="submit">Найти <span aria-hidden="true">↗</span></button>
+      </form>
+      <div class="results-line"><span>Найдено: <strong>{{len .Artists}}</strong></span>{{if or .Query .Label}}<a href="/">Сбросить фильтры</a>{{else}}<a href="#how-it-works">Как считается активность <span aria-hidden="true">↓</span></a>{{end}}</div>
+      <div class="artist-grid">
+      {{range .Artists}}
+        <article class="artist-card">
+          <a class="artist-card-link" href="/artists/{{.ID}}" aria-label="Открыть {{.Name}}">
+            <div class="artist-image-wrap"><img class="artist-image" src="{{.Image}}" alt="{{.Name}}" loading="lazy" decoding="async" width="400" height="400">{{if .Activity.RisingStar}}<span class="rising-badge"><span aria-hidden="true">✦</span> Rising Star</span>{{end}}<span class="card-arrow" aria-hidden="true">↗</span></div>
+            <div class="card-body"><div class="card-meta"><span>С {{.CreationDate}} года</span><span class="badge badge-{{.Activity.Label}}">{{.Activity.Label}}</span></div><h3>{{.Name}}</h3><div class="card-stats"><span><strong>{{.Activity.TourSpread}}</strong> стран</span><span><strong>{{.Activity.ConcertCount}}</strong> дат</span><span class="card-score"><strong>{{.Activity.Score}}</strong> баллов</span></div></div>
+          </a>
+        </article>
+      {{else}}
+        <div class="empty-state"><span aria-hidden="true">♪</span><h3>Пока тишина</h3><p>По этим условиям артисты не найдены. Попробуйте другое имя или уберите фильтр активности.</p><a class="button" href="/">Показать всех артистов</a></div>
       {{end}}
-    </div>
-    <div class="directory-bottom">
-      {{template "freshness" .}}
-      <p>
-        Tour dates come from a historical dataset; labels describe its contents,
-        not live touring status.
-      </p>
-    </div>
-  </section>
-  <aside class="author-strip">
-    <div class="author-mark" aria-hidden="true">↗</div>
-    <div>
-      <p class="eyebrow">MADE IN ASTANA</p>
-      <h2>Different paths. The same discipline.</h2>
-      <p>
-        From military service and martial arts to engineering at Tomorrow
-        School.
-      </p>
-    </div>
-    <a class="text-link" href="/about">Read the field notes ↗</a>
-  </aside>
-</main>
-{{template "footer" .}}{{end}}
+      </div>
+    </section>
+    <section class="explanation" id="how-it-works" aria-labelledby="explain-title"><div><p class="eyebrow">За каждой меткой — числа</p><h2 id="explain-title">Активность без загадок</h2><p>Правило использует географию концертов, количество дат в источнике и продолжительность карьеры. Это оценка доступных гастрольных данных, а не популярности или качества музыки.</p></div><div class="formula-panel"><code>страны × 2 + даты × 3 + min(10, годы / 5)</code><p>Годы делятся на 5 нацело. Возраст карьеры пересчитывается по текущему году при каждом запросе.</p><div class="legend"><span class="badge badge-Emerging">Emerging · 0–10</span><span class="badge badge-Active">Active · 11–25</span><span class="badge badge-Established">Established · 26–40</span><span class="badge badge-Legendary">Legendary · 41+</span></div></div></section>
+  </main>
+  <footer class="site-footer wrap"><a class="brand" href="/">tour-track<span class="brand-dot" aria-hidden="true">●</span></a><p>Гастрольные данные: <a href="https://groupietrackers.herokuapp.com/api" rel="noreferrer">Groupie Trackers API</a>. Сведения могут быть историческими.</p><a href="#content">Наверх ↑</a></footer>
+</body>
+</html>{{end}}

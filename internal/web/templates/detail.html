@@ -1,161 +1,30 @@
-{{define "detail"}}{{template "head" .}}
-<main id="main" class="shell detail-page">
-  <a class="back-link" href="/">← Back to the directory</a>
-  <section class="artist-hero">
-    <div class="portrait">
-      <img
-        src="{{.Artist.Image}}"
-        alt="{{.Artist.Name}}"
-        width="500"
-        height="500"
-      /><span>ARTIST / {{printf "%02d" .Artist.ID}}</span>
+{{define "detail"}}<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#131514">
+  <title>{{.Title}} — tour-track</title>
+  <link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Перейти к артисту</a>
+  <header class="site-header wrap"><a class="brand" href="/" aria-label="tour-track — главная"><span class="brand-mark" aria-hidden="true">↗</span> tour-track<span class="brand-dot" aria-hidden="true">●</span></a><div class="header-right"><a class="header-note" href="/">Все артисты</a><button class="button button-small" data-refresh type="button" hidden>Обновить данные <span aria-hidden="true">↻</span></button></div></header>
+  <main id="content" class="wrap detail-page">
+    <div class="refresh-status" data-refresh-status role="status" aria-live="polite"></div>
+    {{if .Stale}}<div class="notice" role="status"><strong>Свежие данные API не подтверждены.</strong> Показываем сохранённый каталог; при первом запуске используется резервная копия. Время сохранённого каталога: {{.Updated}}. Сведения источника могли измениться.</div>{{end}}
+    <a class="back-link" href="/">← К каталогу артистов</a>
+    {{with .Artist}}
+    <section class="artist-hero" aria-labelledby="artist-title"><div class="detail-image-wrap"><img class="artist-image" src="{{.Image}}" alt="{{.Name}}" width="500" height="500" decoding="async"></div><div class="artist-intro"><p class="eyebrow">В музыке с {{.CreationDate}} года</p><h1 id="artist-title">{{.Name}}</h1><div class="artist-badges"><span class="badge badge-{{.Activity.Label}}">{{.Activity.Label}}</span>{{if .Activity.RisingStar}}<span class="rising-badge"><span aria-hidden="true">✦</span> Rising Star</span>{{end}}</div><p class="album-caption">Первый альбом <strong>{{.FirstAlbum}}</strong></p><div class="detail-metrics"><div><strong>{{.Activity.TourSpread}}</strong><span>стран</span></div><div><strong>{{.Activity.ConcertCount}}</strong><span>концертных дат</span></div><div><strong>{{.Activity.CareerYears}}</strong><span>лет карьеры</span></div></div></div></section>
+    <div class="detail-columns">
+      <section class="panel members-panel" aria-labelledby="members-title"><p class="eyebrow">За сценой</p><h2 id="members-title">Участники</h2><ul class="member-list">{{range .Members}}<li><span class="member-mark" aria-hidden="true">♪</span>{{.}}</li>{{else}}<li>Источник не указал участников.</li>{{end}}</ul></section>
+      <section class="panel activity-panel" aria-labelledby="activity-title"><div class="activity-heading"><div><p class="eyebrow">Прозрачная оценка</p><h2 id="activity-title">Индекс активности</h2></div><div class="score-number">{{.Activity.Score}}<span>баллов</span></div></div><dl class="score-breakdown"><div><dt>Уникальные страны</dt><dd>{{.Activity.TourSpread}} × 2</dd></div><div><dt>Концертные даты</dt><dd>{{.Activity.ConcertCount}} × 3</dd></div><div><dt>Продолжительность карьеры</dt><dd>min(10, {{.Activity.CareerYears}} / 5)</dd></div></dl><p class="muted">Баллы складываются. Деление лет на 5 — целочисленное. Метка: <strong>{{.Activity.Label}}</strong>.</p><div class="rising-explanation"><h3>Детектор Rising Star</h3><p>За последние два года до текущего дня включительно: <strong>{{.Activity.RecentConcerts}}</strong> дат. Метка появляется, когда среднее за эти два года строго больше среднего за карьеру на 50%.</p><p class="muted">Будущие и нераспознанные даты не входят в недавние концерты. При нулевой продолжительности карьеры метка не присваивается.{{if .Activity.InvalidDates}} Нераспознанных дат в источнике: {{.Activity.InvalidDates}}.{{end}}</p></div></section>
     </div>
-    <div class="artist-intro">
-      <p class="eyebrow">THE ARTIST FILE · EST. {{.Artist.CreationDate}}</p>
-      <h1>{{.Artist.Name}}</h1>
-      <div class="badge-row">{{template "badge" .Artist}}</div>
-      <p class="artist-summary">
-        {{.Artist.CareerYears}} career years. {{.Artist.TourSpread}}
-        countries.<br />One trajectory, seen through the archive.
-      </p>
-      <dl class="intro-facts">
-        <div>
-          <dt>FIRST ALBUM</dt>
-          <dd>{{.Artist.FirstAlbum}}</dd>
-        </div>
-        <div>
-          <dt>MEMBERS IN THE API</dt>
-          <dd>{{len .Artist.Members}}</dd>
-        </div>
-      </dl>
-    </div>
-  </section>
-  <section class="score-panel" aria-labelledby="score-heading">
-    <div class="score-total">
-      <p class="eyebrow">ACTIVITY SCORE</p>
-      <strong>{{.Artist.Score}}</strong><span>{{.Artist.Label}}</span>
-    </div>
-    <div class="score-explanation">
-      <h2 id="score-heading">Every point accounted for.</h2>
-      <div class="formula">
-        <div>
-          <strong>{{.Artist.TourSpread}} × 2</strong
-          ><span>unique countries</span>
-        </div>
-        <b>+</b>
-        <div>
-          <strong>{{.Artist.ConcertCount}} × 3</strong
-          ><span>concert dates</span>
-        </div>
-        <b>+</b>
-        <div>
-          <strong>{{.Artist.CareerPoints}}</strong
-          ><span>career points, capped at 10</span>
-        </div>
-      </div>
-      <p>
-        Career: {{.Artist.Year}} − {{.Artist.CreationDate}} =
-        {{.Artist.CareerYears}} years. Career points use whole groups of 5
-        years. <a href="/about#method">How it works ↗</a>
-      </p>
-      <p>
-        {{.Artist.RecentConcerts}} concert dates in the last two years. {{if
-        .Artist.RisingStar}}Recent rate exceeds the career average by more than
-        50%.{{else}}The Rising Star threshold is not met in this dataset.{{end}}
-      </p>
-    </div>
-  </section>
-  <div class="detail-columns">
-    <section class="members" aria-labelledby="members-heading">
-      <p class="eyebrow">01 / THE PEOPLE</p>
-      <h2 id="members-heading">The lineup.</h2>
-      <p class="subtle">Members as listed by the source API.</p>
-      <ul class="member-list">
-        {{range .Artist.Members}}
-        <li><span aria-hidden="true">↗</span>{{.}}</li>
-        {{else}}
-        <li>No members listed.</li>
-        {{end}}
-      </ul>
-      <h3>Countries reached</h3>
-      <div class="country-list">
-        {{range .Artist.Countries}}<span>{{place .}}</span>{{else}}<span
-          >No countries listed.</span
-        >{{end}}
-      </div>
-    </section>
-    <section class="tour-log" aria-labelledby="tour-heading">
-      <p class="eyebrow">02 / THE PLACES</p>
-      <h2 id="tour-heading">On the record.</h2>
-      <p class="subtle">
-        Concert locations and their linked dates. Historical records may include
-        upcoming dates from the original archive.
-      </p>
-      <div class="table-wrap">
-        <table>
-          <caption class="sr-only">
-            Concert locations and dates for {{.Artist.Name}}
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col">LOCATION</th>
-              <th scope="col">CONCERT DATES</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Artist.Concerts}}
-            <tr>
-              <td>
-                <strong class="place-name">{{.Display}}</strong
-                ><code>{{.Location}}</code>
-              </td>
-              <td>
-                {{range .Dates}}<span class="concert-date">{{.}}</span
-                >{{else}}No dates listed{{end}}
-              </td>
-            </tr>
-            {{else}}
-            <tr>
-              <td colspan="2">No linked concert locations in the API.</td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
-      </div>
-      {{if .Artist.UnlinkedDates}}
-      <div class="notice">
-        <strong>Dates without a linked venue</strong>
-        <p>
-          The dates source includes these entries, but the relation source
-          supplies no matching venue. They still count toward the activity
-          score.
-        </p>
-        <div>
-          {{range .Artist.UnlinkedDates}}<span class="concert-date">{{.}}</span
-          >{{end}}
-        </div>
-      </div>
-      {{end}}
-      <details class="raw-locations">
-        <summary>
-          All {{len .Artist.Locations}} locations from the locations source
-        </summary>
-        <ul>
-          {{range .Artist.Locations}}
-          <li><code>{{.}}</code></li>
-          {{else}}
-          <li>No locations listed.</li>
-          {{end}}
-        </ul>
-      </details>
-    </section>
-  </div>
-  <div class="directory-bottom">
-    {{template "freshness" .}}
-    <p>
-      Scores are recomputed at request time. Archive freshness is not the date
-      of the latest concert.
-    </p>
-  </div>
-</main>
-{{template "footer" .}}{{end}}
+    <section class="tour-section" aria-labelledby="tour-title"><div class="section-heading"><div><p class="eyebrow">География звука</p><h2 id="tour-title">Маршрут концертов</h2></div><span class="updated">Связи мест и дат из API</span></div>{{if .Concerts}}<div class="table-scroll"><table class="concert-table"><caption class="sr-only">Места проведения концертов и соответствующие им даты</caption><thead><tr><th scope="col">Место</th><th scope="col">Даты концертов</th></tr></thead><tbody>{{range .Concerts}}<tr><th scope="row"><span class="location-dot" aria-hidden="true">●</span><span class="raw-value">{{.Location}}</span></th><td><div class="date-list">{{range .Dates}}<span>{{.}}</span>{{else}}<span class="muted">Даты не указаны</span>{{end}}</div></td></tr>{{end}}</tbody></table></div>{{else}}<div class="panel"><p class="muted">Источник не передал связи мест и дат.</p></div>{{end}}</section>
+    <div class="detail-columns source-columns"><section class="panel" aria-labelledby="locations-title"><h2 id="locations-title">Все локации</h2><p class="muted">Исходные названия из раздела locations.</p><ul class="source-list">{{range .Locations}}<li class="raw-value">{{.}}</li>{{else}}<li>Локации не указаны.</li>{{end}}</ul><p class="muted">В источнике Бразилия обозначена как <code>brazil</code>; <code>brasil</code> — альтернативное написание из ТЗ. Например, <code>sao_paulo-brasil</code> и <code>sao_paulo-brazil</code> обозначают одно место. Исходные значения сохранены.</p></section><section class="panel" aria-labelledby="dates-title"><h2 id="dates-title">Все даты</h2><p class="muted">Исходные значения из раздела dates. Звёздочка сохранена как в API.</p><div class="date-list source-dates">{{range .Dates}}<span>{{.}}</span>{{else}}<p class="muted">Даты не указаны.</p>{{end}}</div></section></div>
+    {{with .ImageCredit}}<section class="panel photo-credit" aria-labelledby="photo-credit-title"><h2 id="photo-credit-title">Фотография</h2><p>Иллюстрация из Wikimedia Commons: <a href="{{.Source}}" rel="noreferrer">{{.Title}}</a>. Автор: {{.Author}}. Лицензия: {{if .LicenseURL}}<a href="{{.LicenseURL}}" rel="noreferrer">{{.License}}</a>{{else}}{{.License}}{{end}}. Использована уменьшенная копия.</p></section>{{end}}
+    <section class="countries-section"><h2>Страны в расчёте</h2><div class="country-list">{{range .Activity.Countries}}<span>{{.}}</span>{{else}}<p class="muted">Страны не определены.</p>{{end}}</div></section>
+    {{end}}
+    <p class="data-footnote">Время сохранённого каталога: {{.Updated}}. Каталог отражает сведения источника, включая исторические концерты.</p>
+  </main>
+  <footer class="site-footer wrap"><a class="brand" href="/">tour-track<span class="brand-dot" aria-hidden="true">●</span></a><p>Гастрольные данные: <a href="https://groupietrackers.herokuapp.com/api" rel="noreferrer">Groupie Trackers API</a>.</p><a href="#content">Наверх ↑</a></footer>
+</body>
+</html>{{end}}

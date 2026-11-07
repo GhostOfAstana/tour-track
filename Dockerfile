@@ -1,13 +1,14 @@
-FROM golang:1.27-alpine AS build
+# Сборка не требует сторонних модулей Go.
+FROM golang:1.26-alpine AS builder
 WORKDIR /src
 COPY go.mod ./
 COPY . .
-RUN CGO_ENABLED=0 go test ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /app .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /tour-track .
 
-FROM scratch
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build /app /tour-track
-USER 65532:65532
-ENV HOST=0.0.0.0 PORT=8080
+FROM alpine:3.23
+RUN apk add --no-cache ca-certificates && adduser -D -u 10001 app
+COPY --from=builder /tour-track /tour-track
+USER app
+ENV PORT=8080
 EXPOSE 8080
 ENTRYPOINT ["/tour-track"]

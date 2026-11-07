@@ -1,97 +1,173 @@
-package activity
+package activity_test
 
 import (
+	"reflect"
 	"testing"
 	"time"
+
+	"tour-track/internal/activity"
 )
 
-func TestScoreAndClassify(t *testing.T) {
+func TestScoreAndClassification(t *testing.T) {
 	tests := []struct {
-		name                           string
-		spread, concerts, years, score int
-		label                          string
+		name                       string
+		countries, concerts, years int
+		score                      int
+		label                      string
 	}{
-		{"empty", 0, 0, 0, 0, "Emerging"}, {"emerging upper", 5, 0, 0, 10, "Emerging"},
-		{"active lower", 4, 1, 0, 11, "Active"}, {"active upper", 2, 7, 0, 25, "Active"},
-		{"established lower", 1, 8, 0, 26, "Established"}, {"subject example", 5, 8, 30, 40, "Established"},
-		{"legendary lower", 1, 13, 0, 41, "Legendary"}, {"whole years", 0, 0, 29, 5, "Emerging"},
-		{"career cap", 0, 0, 500, 10, "Emerging"}, {"negative", -2, -3, -5, 0, "Emerging"},
-		{"overflow spread", maxInt, 0, 0, maxInt, "Legendary"}, {"overflow concerts", 0, maxInt, maxInt, maxInt, "Legendary"},
+		{"пустые данные", 0, 0, 0, 0, "Emerging"},
+		{"граница 10", 0, 0, 50, 10, "Emerging"},
+		{"граница 11", 1, 3, 0, 11, "Active"},
+		{"граница 25", 2, 7, 0, 25, "Active"},
+		{"граница 26", 1, 8, 0, 26, "Established"},
+		{"пример ТЗ и граница 40", 5, 8, 30, 40, "Established"},
+		{"граница 41", 1, 13, 0, 41, "Legendary"},
+		{"неполное пятилетие", 0, 0, 4, 0, "Emerging"},
+		{"полное пятилетие", 0, 0, 5, 1, "Emerging"},
+		{"49 лет", 0, 0, 49, 9, "Emerging"},
+		{"ограничение стажа", 0, 0, 500, 10, "Emerging"},
+		{"отрицательные данные", -4, -2, -10, 0, "Emerging"},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := Score(tc.spread, tc.concerts, tc.years); got != tc.score {
-				t.Errorf("score=%d, want %d", got, tc.score)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := activity.Score(tt.countries, tt.concerts, tt.years); got != tt.score {
+				t.Errorf("Score = %d; нужно %d", got, tt.score)
 			}
-			if got := Classify(tc.spread, tc.concerts, tc.years); got != tc.label {
-				t.Errorf("label=%q, want %q", got, tc.label)
+			if got := activity.Classify(tt.countries, tt.concerts, tt.years); got != tt.label {
+				t.Errorf("Classify = %q; нужно %q", got, tt.label)
 			}
 		})
+	}
+}
+
+func TestScoreSaturatesInsteadOfOverflowing(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	for _, inputs := range [][3]int{{maxInt, 0, 0}, {0, maxInt, 0}, {maxInt, maxInt, maxInt}} {
+		if got := activity.Score(inputs[0], inputs[1], inputs[2]); got != maxInt {
+			t.Errorf("Score(%v) = %d; нужно насыщение %d", inputs, got, maxInt)
+		}
+		if got := activity.Classify(inputs[0], inputs[1], inputs[2]); got != "Legendary" {
+			t.Errorf("Classify(%v) = %q", inputs, got)
+		}
+	}
+	minInt := -maxInt - 1
+	if got := activity.Score(minInt, minInt, minInt); got != 0 {
+		t.Errorf("минимальные числа должны дать 0, получено %d", got)
+	}
+}
+
+func TestCountries(t *testing.T) {
+	locations := []string{
+		"los_angeles-usa", "HOUSTON-USA", " a-united_states ", "b-united states of america",
+		"london-uk", "a-united_kingdom", "sao_paulo-brasil", "rio-brazil",
+		"new-city-new_zealand", "paris-france", "c-france", "a-south_korea",
+		"a-north_korea", "", "invalid", "-usa", "city-", "city-   ",
+	}
+	want := []string{"brazil", "france", "new zealand", "north korea", "south korea", "uk", "usa"}
+	if got := activity.Countries(locations); !reflect.DeepEqual(got, want) {
+		t.Errorf("страны = %#v; нужно %#v", got, want)
+	}
+	if got := activity.Countries(nil); got == nil || len(got) != 0 {
+		t.Errorf("пустой список должен сериализоваться как [], получено %#v", got)
 	}
 }
 
 func TestRisingStar(t *testing.T) {
-	for _, tc := range []struct {
+	tests := []struct {
 		name                 string
-		recent, total, years int
+		total, recent, years int
 		want                 bool
 	}{
-		{"7 per year versus 4", 14, 40, 10, true}, {"5 per year versus 4", 10, 40, 10, false},
-		{"exactly 50 percent", 12, 40, 10, false}, {"zero career", 10, 10, 0, false},
-		{"zero concerts", 0, 0, 10, false}, {"invalid recent", 100, 10, 10, false}, {"negative", -1, 10, 10, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := IsRisingStar(tc.recent, tc.total, tc.years); got != tc.want {
-				t.Fatalf("got %v want %v", got, tc.want)
+		{"пример ТЗ: 7 против 4", 40, 14, 10, true},
+		{"пример ТЗ: 5 против 4", 40, 10, 10, false},
+		{"ровно 50 процентов", 40, 12, 10, false},
+		{"чуть выше 50 процентов", 40, 13, 10, true},
+		{"нулевой стаж", 2, 2, 0, false},
+		{"нулевые концерты", 0, 0, 10, false},
+		{"отрицательный стаж", 2, 2, -2, false},
+		{"отрицательное количество", -2, 2, 10, false},
+		{"нет недавних концертов", 2, 0, 10, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := activity.IsRisingStar(tt.total, tt.recent, tt.years); got != tt.want {
+				t.Errorf("IsRisingStar = %v; нужно %v", got, tt.want)
 			}
 		})
 	}
-}
-
-func TestRecentWindow(t *testing.T) {
-	now := time.Date(2026, 9, 28, 15, 0, 0, 0, time.UTC)
-	dates := []string{"*28-09-2024", "27-09-2024", "28-09-2026", "29-09-2026", "01-01-2025", "garbage", "31-02-2026", "01-01-2025"}
-	if got := RecentCount(dates, now); got != 4 {
-		t.Fatalf("got %d recent dates, want 4", got)
+	maxInt := int(^uint(0) >> 1)
+	if !activity.IsRisingStar(maxInt, maxInt, maxInt) {
+		t.Error("перемножение максимальных значений не должно менять верный результат")
 	}
-	leap := time.Date(2024, 2, 29, 0, 0, 0, 0, time.UTC)
-	if got := RecentCount([]string{"28-02-2022", "01-03-2022", "29-02-2024"}, leap); got != 2 {
-		t.Fatalf("calendar leap window: %d", got)
+	if activity.IsRisingStar(maxInt, 1, maxInt) {
+		t.Error("1 × maxInt не больше 3 × maxInt")
 	}
 }
 
-func FuzzScore(f *testing.F) {
+func TestAnalyzeUsesRequestYearAndDateWindow(t *testing.T) {
+	zone := time.FixedZone("UTC+5", 5*60*60)
+	now := time.Date(2026, time.November, 7, 17, 45, 0, 0, zone)
+	dates := []string{
+		"*07-11-2024", // Левая граница включается.
+		"06-11-2024",  // День до окна не включается.
+		"07-11-2026",  // Сегодня включается независимо от времени суток.
+		"08-11-2026",  // Завтра ещё не означает состоявшийся концерт.
+		" 07-11-2026 ", "31-02-2026", "", "2026-11-07", "29-02-2024",
+	}
+	got := activity.Analyze([]string{"a-usa", "b-usa", "a-uk"}, dates, 2000, now)
+	if got.TourSpread != 2 || got.ConcertCount != 9 || got.CareerYears != 26 {
+		t.Errorf("исходные значения неверны: %+v", got)
+	}
+	if got.RecentConcerts != 3 || got.InvalidDates != 3 {
+		t.Errorf("окно или некорректные даты посчитаны неверно: %+v", got)
+	}
+	if got.Score != 36 || got.Label != "Established" || !got.RisingStar {
+		t.Errorf("итог неверен: %+v", got)
+	}
+	nextYear := now.AddDate(1, 0, 0)
+	if next := activity.Analyze(nil, nil, 2000, nextYear); next.CareerYears != 27 {
+		t.Errorf("стаж не пересчитан при следующем запросе: %+v", next)
+	}
+}
+
+func TestAnalyzeLeapYearAndInvalidCareer(t *testing.T) {
+	now := time.Date(2024, time.February, 29, 12, 0, 0, 0, time.UTC)
+	got := activity.Analyze(nil, []string{"28-02-2022", "01-03-2022", "29-02-2024"}, 2025, now)
+	// AddDate использует календарное правило Go: 29.02.2024 минус два года — 01.03.2022.
+	if got.RecentConcerts != 2 || got.CareerYears != 0 || got.RisingStar {
+		t.Errorf("неверная обработка високосного года или будущего начала карьеры: %+v", got)
+	}
+	maxInt := int(^uint(0) >> 1)
+	got = activity.Analyze(nil, nil, -maxInt-1, now)
+	if got.CareerYears != maxInt || got.Score != 10 {
+		t.Errorf("экстремальный год вызвал переполнение: %+v", got)
+	}
+}
+
+func FuzzScoreNeverBecomesNegative(f *testing.F) {
 	f.Add(5, 8, 30)
-	f.Add(-1, 0, 0)
-	f.Add(maxInt, maxInt, maxInt)
-	f.Fuzz(func(t *testing.T, a, b, c int) {
-		score := Score(a, b, c)
+	f.Add(0, 0, 0)
+	f.Add(-1, -1, -1)
+	f.Add(int(^uint(0)>>1), 1, 1)
+	f.Fuzz(func(t *testing.T, countries, concerts, years int) {
+		score := activity.Score(countries, concerts, years)
 		if score < 0 {
-			t.Fatal("score overflowed")
+			t.Fatalf("отрицательный балл %d для (%d, %d, %d)", score, countries, concerts, years)
 		}
-		if Score(a, b, c) != score {
-			t.Fatal("score is not deterministic")
-		}
-		label := Classify(a, b, c)
-		if label != "Emerging" && label != "Active" && label != "Established" && label != "Legendary" {
-			t.Fatal(label)
-		}
-		if a >= 0 && a < maxInt && Score(a+1, b, c) < score {
-			t.Fatal("adding a country lowered score")
+		if countries >= 0 && countries < int(^uint(0)>>1) && activity.Score(countries+1, concerts, years) < score {
+			t.Fatal("добавление страны уменьшило активность")
 		}
 	})
 }
 
-func FuzzDate(f *testing.F) {
-	f.Add("*28-09-2026")
-	f.Add("")
-	f.Add("not a date")
-	f.Fuzz(func(t *testing.T, raw string) {
-		date, err := ParseDate(raw)
-		if err == nil {
-			if _, err := ParseDate(date.Format("02-01-2006")); err != nil {
-				t.Fatal(err)
-			}
+func FuzzAnalyzeMalformedInput(f *testing.F) {
+	f.Add("los_angeles-usa", "*07-11-2026", 1990)
+	f.Add("", "bad date", 2027)
+	now := time.Date(2026, time.November, 7, 12, 0, 0, 0, time.UTC)
+	f.Fuzz(func(t *testing.T, location, date string, creationYear int) {
+		result := activity.Analyze([]string{location}, []string{date}, creationYear, now)
+		if result.ConcertCount != 1 || result.Score < 0 || result.CareerYears < 0 || result.RecentConcerts > 1 {
+			t.Fatalf("нарушены ограничения результата: %+v", result)
 		}
 	})
 }

@@ -1,12 +1,5 @@
-{{define "error"}}{{template "head" .}}
-<main id="main" class="shell error-page">
-  <p class="eyebrow">SIGNAL INTERRUPTED / {{.Status}}</p>
-  <h1>{{.Status}}</h1>
-  <h2>{{.Title}}</h2>
-  <p>{{.Message}}</p>
-  <div class="error-actions">
-    <a href="/" class="button">Return to the directory ↗</a
-    ><a href="/about" class="text-link">Read the field notes</a>
-  </div>
-</main>
-{{template "footer" .}}{{end}}
+{{define "error"}}<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#131514"><title>{{.Title}} — tour-track</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
+<body><a class="skip-link" href="#content">Перейти к сообщению</a><header class="site-header wrap"><a class="brand" href="/" aria-label="tour-track — главная"><span class="brand-mark" aria-hidden="true">↗</span> tour-track<span class="brand-dot" aria-hidden="true">●</span></a><a class="header-note" href="/">Каталог артистов</a></header><main id="content" class="wrap error-page"><span class="error-symbol" aria-hidden="true">Ⅱ</span><p class="eyebrow">Небольшая пауза</p><h1>{{.Title}}</h1><p>{{.Error}}</p><a class="button button-primary" href="/">На главную <span aria-hidden="true">↗</span></a><p class="error-help">Если источник временно недоступен, попробуйте открыть каталог немного позже.</p></main><footer class="site-footer wrap"><a class="brand" href="/">tour-track<span class="brand-dot" aria-hidden="true">●</span></a><p>Музыка продолжится.</p></footer></body>
+</html>{{end}}

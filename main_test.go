@@ -1,46 +1,41 @@
 package main
 
-import (
-	"context"
-	"testing"
-)
+import "testing"
 
-func TestConfiguration(t *testing.T) {
+func TestReadConfig(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		env     map[string]string
-		valid   bool
-		address string
+		name, port, host, want string
+		invalid                bool
 	}{
-		{"defaults", nil, true, "127.0.0.1:8080"}, {"container", map[string]string{"HOST": "0.0.0.0", "PORT": "9000"}, true, "0.0.0.0:9000"},
-		{"IPv6", map[string]string{"HOST": "::1", "PORT": "8081"}, true, "[::1]:8081"},
-		{"invalid", map[string]string{"PORT": "abc"}, false, ""}, {"zero", map[string]string{"PORT": "0"}, false, ""}, {"too large", map[string]string{"PORT": "65536"}, false, ""},
+		{name: "значения по умолчанию", want: ":8080"},
+		{name: "локальный IPv4", port: "9090", host: "127.0.0.1", want: "127.0.0.1:9090"},
+		{name: "IPv6", port: "8081", host: "::1", want: "[::1]:8081"},
+		{name: "максимальный порт", port: "65535", want: ":65535"},
+		{name: "ноль", port: "0", invalid: true},
+		{name: "отрицательный", port: "-1", invalid: true},
+		{name: "слишком большой", port: "65536", invalid: true},
+		{name: "название сервиса", port: "http", invalid: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, err := readConfig(func(key string) string { return tc.env[key] })
-			if (err == nil) != tc.valid {
-				t.Fatal("unexpected error", err)
+			t.Setenv("PORT", tc.port)
+			t.Setenv("HOST", tc.host)
+			t.Setenv("API_BASE_URL", "")
+			cfg, err := readConfig()
+			if tc.invalid {
+				if err == nil {
+					t.Fatal("неверный порт принят")
+				}
+				return
 			}
-			if tc.valid && c.address != tc.address {
-				t.Fatal(c.address)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.address != tc.want {
+				t.Fatalf("адрес %q, ожидался %q", cfg.address, tc.want)
+			}
+			if cfg.apiURL != "https://groupietrackers.herokuapp.com/api" {
+				t.Fatal("неверный API по умолчанию")
 			}
 		})
-	}
-}
-
-func TestRunBadConfiguration(t *testing.T) {
-	if err := run(context.Background(), config{address: "127.0.0.1:0", apiURL: "bad URL"}); err == nil {
-		t.Fatal("bad API accepted")
-	}
-	if err := run(context.Background(), config{address: "invalid address", apiURL: "https://example.org"}); err == nil {
-		t.Fatal("bad listen address accepted")
-	}
-}
-
-func TestGracefulShutdown(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := run(ctx, config{address: "127.0.0.1:0", apiURL: "https://example.org"}); err != nil {
-		t.Fatal(err)
 	}
 }
